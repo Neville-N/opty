@@ -40,7 +40,10 @@ state_symbols = (theta(t), omega(t), W(t), W2(t))
 constant_symbols = (m, g, d)
 specified_symbols = (T(t),)
 
-
+# update based on command when changing the symbols:
+# print(prob._extraction_indices.keys())
+free_order = [theta(t), omega(t), W(t), W2(t), T(t), Wdt_delay(t), h]
+print(free_order.index(T(t)))
 # W2 = W - W_delay
 # W2dt = ? Wdt - Wdt_delay
 
@@ -87,7 +90,8 @@ def obj_grad(prob, free):
 def delay_traj(free):
     time = np.linspace(0, free[-1] * (num_nodes - 1), num_nodes)
     delayed_time = np.clip(time - time_delay, 0, None)
-    W_arr = free[2 * num_nodes : 3 * num_nodes]
+    W_index = free_order.index(W(t))
+    W_arr = free[W_index * num_nodes : (W_index + 1) * num_nodes]
     w_delay = np.interp(delayed_time, time, W_arr)
     return w_delay
 
@@ -95,8 +99,10 @@ def delay_traj(free):
 def delaydt_traj(free):
     time = np.linspace(0, free[-1] * (num_nodes - 1), num_nodes)
     delayed_time = np.clip(time - time_delay, 0, None)
-    T_arr = free[6 * num_nodes : 7 * num_nodes]
-    omega_arr = free[2 * num_nodes : 3 * num_nodes]
+    T_index = free_order.index(T(t))
+    omega_index = free_order.index(omega(t))
+    T_arr = free[T_index * num_nodes : (T_index + 1) * num_nodes]
+    omega_arr = free[omega_index * num_nodes : (omega_index + 1) * num_nodes]
     wdt = Wdt_numeric(T_arr, omega_arr)
     wdt_delay = np.interp(delayed_time, time, wdt)
     return wdt_delay
@@ -145,6 +151,10 @@ prob = Problem(
     backend="numpy",
 )
 
+# %%
+print(prob._extraction_indices.keys())
+for k, v in prob._extraction_indices.items():
+    print(f"{k}: {v[0]}")  
 # %%
 # Use existing solution if available else pick a reasonable initial guess and
 # solve the problem. Use approximately zero as an initial guess to avoid
