@@ -29,19 +29,27 @@ num_nodes = 501
 # W is the total positive work done by the torque input.
 # W is calculated with a soft plus function to avoid non-smoothness.
 m, g, d, t, h = sm.symbols("m, g, d, t, h", real=True)
-theta, omega, T, W = sm.symbols("theta, omega, T, W", cls=sm.Function)
-P = T(t) * omega(t) # Power
+theta, omega, T, W, W_delay, Wdt_delay, W2 = sm.symbols("theta, omega, T, W, Wdelay, Wdtdelay, W2", cls=sm.Function)
+P = T(t) * omega(t)  # Power
 
-state_symbols = (theta(t), omega(t), W(t))
+sharpness = 10.0
+Wdt_func = 1 / sharpness * sm.ln(sm.exp(sharpness * (T(t) * omega(t))) + 1)
+Wdt_numeric = sm.lambdify((T(t), omega(t)), Wdt_func, "numpy")
+
+state_symbols = (theta(t), omega(t), W(t), W2(t))
 constant_symbols = (m, g, d)
 specified_symbols = (T(t),)
 
-sharpness = 10.0
+
+# W2 = W - W_delay
+# W2dt = ? Wdt - Wdt_delay
+
 eom = sm.Matrix(
     [
         theta(t).diff() - omega(t),
         m * d**2 * omega(t).diff() + m * g * d * sm.sin(theta(t)) - T(t),
-        W(t).diff() - 1/sharpness*sm.ln(sm.exp(sharpness*P) + 1),
+        W(t).diff() - Wdt_func,
+        W2(t).diff() - (Wdt_func - Wdt_delay(t)),
     ]
 )
 sm.pprint(eom)
@@ -53,6 +61,7 @@ par_map = {
     g: 9.81,
     d: 1.0,
 }
+time_delay = 2.0  # seconds
 
 
 # %%
@@ -75,6 +84,24 @@ def obj_grad(prob, free):
     return grad
 
 
+def delay_traj(free):
+    time = np.linspace(0, free[-1] * (num_nodes - 1), num_nodes)
+    delayed_time = np.clip(time - time_delay, 0, None)
+    W_arr = free[2 * num_nodes : 3 * num_nodes]
+    w_delay = np.interp(delayed_time, time, W_arr)
+    return w_delay
+
+
+def delaydt_traj(free):
+    time = np.linspace(0, free[-1] * (num_nodes - 1), num_nodes)
+    delayed_time = np.clip(time - time_delay, 0, None)
+    T_arr = free[6 * num_nodes : 7 * num_nodes]
+    omega_arr = free[2 * num_nodes : 3 * num_nodes]
+    wdt = Wdt_numeric(T_arr, omega_arr)
+    wdt_delay = np.interp(delayed_time, time, wdt)
+    return wdt_delay
+
+
 # %%
 # Specify the symbolic instance constraints, i.e. initial and end conditions
 # using node numbers 0 to N - 1
@@ -84,6 +111,7 @@ instance_constraints = (
     omega(0 * h),
     omega((num_nodes - 1) * h),
     W(0 * h),
+    W2(0 * h),
 )
 
 # %%
@@ -110,6 +138,10 @@ prob = Problem(
     instance_constraints=instance_constraints,
     time_symbol=t,
     bounds=bounds,
+    known_trajectory_map={
+        W_delay(t): delay_traj,
+        W_delay(t).diff(t): delaydt_traj,
+    },
     backend="numpy",
 )
 
